@@ -40,7 +40,6 @@
   ],
   "scripts": {
     "build": "tsdown",
-    "prepare": "tsdown",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts"
   },
