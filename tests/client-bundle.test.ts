@@ -12,6 +12,7 @@
 import { readFileSync } from 'node:fs'
 
 import assert from 'node:assert/strict'
+import { test } from 'node:test'
 
 const BUNDLE = new URL('../lib/client.js', import.meta.url)
 
@@ -80,5 +81,97 @@ for (const forbidden of ['node:fs', 'node:http', 'undici', 'RiverAccountPool', '
 assert.ok(source.includes('river'), 'the bundle must name the remote namespace')
 assert.ok(source.includes('settings.models.provider-card'), 'the bundle must register the provider card slot')
 assert.ok(source.includes('settings.section'), 'the bundle must register the settings section slot')
+
+// ---------------------------------------------------------------------------
+// Run `apply` for real.
+//
+// The source scans above prove the strings are present, which is exactly the
+// assertion that let a host half ship that the kernel could not import at all.
+// So this drives the entry point with a fake client context and checks what it
+// actually registers: a bundle that loads but registers nothing is the failure
+// mode that has no error message anywhere.
+// ---------------------------------------------------------------------------
+
+/** A snapshot the host could really emit; the client parser is strict. */
+function snapshot(showSettingsSection: boolean): unknown {
+  return {
+    provider: 'river',
+    apiBase: 'https://api.river.ai/v1',
+    accounts: [],
+    models: [],
+    defaults: {
+      contextWindowLimit: 1_048_576,
+      maxOutputTokens: 384_000,
+      activeAccount: '',
+      defaultReasoningEffort: {},
+    },
+    modelAccountRules: [],
+    ui: { showSettingsSection },
+  }
+}
+
+interface Recording {
+  injected: string[]
+  registered: Array<{ name?: string; key?: string; id?: string }>
+  mounted: string[]
+  warns: string[]
+}
+
+/** A client context with only the services `apply` touches. */
+function fakeContext(showSettingsSection: boolean): { ctx: Record<string, unknown>; seen: Recording } {
+  const seen: Recording = { injected: [], registered: [], mounted: [], warns: [] }
+  const ctx: Record<string, unknown> = {
+    logger: { warn: (message: string) => seen.warns.push(message) },
+    effect: (run: () => unknown) => run(),
+    get: (key: string) => (key === 'remote.river'
+      // A Remote call answers with an envelope, not with the payload itself.
+      ? { state: async () => ({ ok: true, value: snapshot(showSettingsSection) }) }
+      : undefined),
+    inject: (_names: unknown, run: (value: unknown) => void) => run(ctx),
+    remote: {
+      $mount: async (spec: { package: string }) => {
+        seen.mounted.push(spec.package)
+        return () => undefined
+      },
+    },
+    slots: {
+      inject: (name: string, run: () => void) => {
+        seen.injected.push(name)
+        run()
+      },
+      register: (options: Record<string, unknown>) => {
+        seen.registered.push(options as Recording['registered'][number])
+        return () => undefined
+      },
+    },
+  }
+  return { ctx, seen }
+}
+
+test('apply registers the provider card and mounts the Remote', async () => {
+  const { ctx, seen } = fakeContext(false)
+  const apply = bundle.exports.apply as (value: unknown) => void
+  apply(ctx)
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.deepEqual(seen.mounted, ['@mars-sea/dsh-river-provider'], 'the bundle must mount its Remote namespace')
+  assert.ok(seen.injected.includes('settings.models.provider-card'), 'the provider card slot must be waited for')
+  const card = seen.registered.find((entry) => entry.name === 'settings.models.provider-card')
+  assert.ok(card !== undefined, 'the bundle must register the provider card')
+  assert.equal(card.key, 'llm-river', 'the card is keyed by the settings namespace')
+  assert.deepEqual(seen.warns, [], 'registration must not fall into a warning path')
+})
+
+test('the settings section stays out until the switch is on', async () => {
+  const { ctx, seen } = fakeContext(true)
+  const apply = bundle.exports.apply as (value: unknown) => void
+  apply(ctx)
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.ok(seen.injected.includes('settings.section'), 'the section slot must be waited for')
+  const section = seen.registered.find((entry) => entry.name === 'settings.section')
+  assert.ok(section !== undefined, 'an enabled switch must register the section')
+  assert.equal(section.id, 'river', 'the section id names the provider')
+})
 
 console.log('client bundle: ok')
