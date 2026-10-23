@@ -28,7 +28,7 @@ context/output limits, per-model reasoning efforts and per-million-token prices.
 ## Install
 
 ```bash
-dsh plugin --profile web add github:ExSchwi/dsh-river-provider#v0.2.1
+dsh plugin --profile web add github:ExSchwi/dsh-river-provider#v0.2.2
 ```
 
 `--profile` is **required** — `dsh plugin` forwards its remaining arguments to pnpm inside
