@@ -1,0 +1,20 @@
+# Build output is produced by `tsdown` and shipped in the published package,
+# but it is regenerated from src/ on every build: keeping it out of git keeps
+# diffs reviewable and prevents a stale bundle from being committed by accident.
+lib/
+
+# Dependencies
+node_modules/
+
+# npm pack output
+*.tgz
+
+# Local tooling state
+.dsh/
+*.local
+*.log
+
+# Secrets: never commit a river.ai key or a credentials file
+.credentials.yaml
+.env
+.env.*

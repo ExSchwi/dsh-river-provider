@@ -1,0 +1,15 @@
+# dsh-river-provider bundle layer.
+#
+# One plugin row: registers the `river` provider route over every configured
+# river.ai API key. All fields are optional — schema defaults apply.
+#
+# `name` must be the FULL package specifier as installed in the profile's
+# node_modules: the loader imports it as a module and pnpm links packages by
+# their true (scoped) name, so a bare `dsh-river-provider` here fails to
+# resolve (ERR_MODULE_NOT_FOUND) and crashes the app on boot. Quote the value:
+# a YAML scalar starting with `@` is parsed as a directive and fails to parse.
+- insert:
+    - id: llm-river
+      name: "@mars-sea/dsh-river-provider"
+      config:
+        apiKeyEnv: RIVERAI_API_KEY

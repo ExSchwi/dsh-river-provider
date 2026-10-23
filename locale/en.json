@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "river.ai Provider",
+    "description": "Unofficial river.ai provider: model catalog snapshot, multi-account rotation (automatic failover on 429/401), per-model validated output budgets and reasoning levels."
+  }
+}

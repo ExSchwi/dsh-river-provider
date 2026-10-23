@@ -1,0 +1,84 @@
+{
+  "name": "@mars-sea/dsh-river-provider",
+  "version": "0.1.0",
+  "description": "DeepSeek Harness LLM provider plugin for river.ai: one provider route over an unlimited set of API-key accounts with passive rotation, live model catalog and per-account usage.",
+  "icon": "./icon.svg",
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./locale/*.json": "./locale/*.json",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "compatibility": {
+      "dshReleases": {
+        "0.2.1-rc.2": "compatible"
+      },
+      "dsh": "0.2.1-rc.2"
+    }
+  },
+  "files": [
+    "lib",
+    "!lib/**/*.map",
+    "locale",
+    "cordis.patch.yml",
+    "icon.svg",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "prepare": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts"
+  },
+  "engines": {
+    "node": ">=22",
+    "dsh": "0.2.1-rc.2"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "river",
+    "river.ai",
+    "llm",
+    "adapter",
+    "provider",
+    "plugin",
+    "bundle"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.4 || ~4.0.5",
+    "@deepseek-ai/dsh-attachment": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-credentials": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-launch-environment": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-llm": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-settings": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-timeout": "0.2.1-rc.2",
+    "@deepseek-ai/schemastery": "~3.18.4 || ~3.18.5"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.5",
+    "@deepseek-ai/dsh-attachment": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-credentials": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-launch-environment": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-llm": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-settings": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-timeout": "0.2.1-rc.2",
+    "@deepseek-ai/schemastery": "^3.18.5",
+    "@types/node": "^22.0.0",
+    "tsdown": "^0.22.2",
+    "tsx": "^4.23.12",
+    "typescript": "^5.9.0"
+  }
+}

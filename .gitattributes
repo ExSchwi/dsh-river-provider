@@ -1,0 +1,5 @@
+# Every source file stays LF in the repository and in the working tree.
+# A CRLF checkout would still work for Node, but the bundle, the YAML patch
+# layer and the tests are compared byte-for-byte during review and on WSL/macOS
+# machines, so a platform-dependent line ending is an avoidable diff.
+* text=auto eol=lf
