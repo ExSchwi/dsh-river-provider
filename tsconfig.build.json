@@ -1,0 +1,30 @@
+{
+  /**
+   * Emit configuration for the Host half only.
+   *
+   * The Host half is emitted by `tsc`, not by the bundler, because it uses
+   * standard (TC39) decorators: `@Remote` in `src/remote-service.ts`. oxc — the
+   * transformer behind tsdown/rolldown — passed them through untransformed no
+   * matter how the options were set, and Node's ESM parser then rejected the
+   * whole module with `SyntaxError: Invalid or unexpected token`. `tsc` emits
+   * the `__esDecorate` helpers itself, so the decorators are gone by the time
+   * the loader sees the file.
+   *
+   * The browser half keeps the bundler: it needs one self-contained file.
+   */
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "lib",
+    "rootDir": "src",
+    "declaration": true,
+    "declarationMap": false,
+    "sourceMap": true
+  },
+  "include": [
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "src/client.tsx"
+  ]
+}

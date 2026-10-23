@@ -1,6 +1,6 @@
 {
   "name": "@mars-sea/dsh-river-provider",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "DeepSeek Harness LLM provider plugin for river.ai: one provider route over an unlimited set of API-key accounts with passive rotation, live model catalog and per-account usage.",
   "icon": "./icon.svg",
   "repository": {
@@ -52,7 +52,11 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsdown",
+    "clean": "node -e \"require('node:fs').rmSync('lib', { recursive: true, force: true })\"",
+    "build": "npm run clean && npm run build:host && npm run build:client && npm run check:dist",
+    "build:host": "tsc -p tsconfig.build.json",
+    "build:client": "tsdown",
+    "check:dist": "node scripts/check-dist.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts"
   },

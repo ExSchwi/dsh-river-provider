@@ -3,17 +3,17 @@ import { readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { defineConfig } from 'tsdown'
 
 /**
- * Self-contained build: transpile src/ to ESM under lib/ without project
- * references or type checking. Peer packages stay external — the host's
- * loader resolves them from the profile's own node_modules.
+ * The browser half of the build: `src/client.tsx` → `lib/client.js`.
  *
- * Two artifacts come out of the same run:
+ * The Host half is emitted by `tsc -p tsconfig.build.json` instead, because it
+ * carries standard decorators that this bundler passes through untransformed
+ * (see `tsconfig.build.json` for the whole story). `npm run build` runs both,
+ * in that order.
  *
- * - `lib/index.js`  — the Host half, ordinary ESM imported by the kernel.
- * - `lib/client.js` — the browser half. The web client does not `import` it; it
- *   evaluates the file and expects a `window.__ModuleLoader__.load` call whose
- *   factory returns the module exports. The wrapper is applied after the
- *   bundler is done, so nothing inside the bundle can shadow it.
+ * The web client does not `import` the bundle; it evaluates the file and
+ * expects a `window.__ModuleLoader__.load` call whose factory returns the
+ * module exports. The wrapper is applied after the bundler is done, so nothing
+ * inside the bundle can shadow it.
  */
 
 const CLIENT_PACKAGE = '@mars-sea/dsh-river-provider'
@@ -47,27 +47,6 @@ const CLIENT_FOOTER = [
 ].join('\n')
 
 export default defineConfig([
-  {
-    entry: { index: 'src/index.ts' },
-    format: ['esm'],
-    target: 'node22',
-    outDir: 'lib',
-    clean: true,
-    sourcemap: true,
-    dts: true,
-    outExtensions: () => ({ js: '.js', dts: '.d.ts' }),
-    deps: {
-      neverBundle: [
-        '@deepseek-ai/cordis',
-        '@deepseek-ai/schemastery',
-        '@deepseek-ai/dsh-llm',
-        '@deepseek-ai/dsh-attachment',
-        '@deepseek-ai/dsh-credentials',
-        '@deepseek-ai/dsh-launch-environment',
-        '@deepseek-ai/dsh-settings',
-      ],
-    },
-  },
   {
     entry: { client: 'src/client.tsx' },
     format: ['iife'],
