@@ -99,6 +99,14 @@ export interface RiverConfig {
   visibleModels?: string[]
   /** Per-model visibility overrides, applied after `visibleModels`. */
   modelVisibility?: Record<string, boolean>
+  /**
+   * Whether the settings navigation shows a dedicated river.ai page.
+   *
+   * Off by default: the provider card already carries everything the page does,
+   * and a nav entry nobody asked for is clutter. The page is the better home for
+   * the account table, so it stays one switch away.
+   */
+  showSettingsSection?: boolean
 }
 
 const Config = Schema.object({
@@ -153,6 +161,12 @@ const Config = Schema.object({
   modelVisibility: Schema.dict(Schema.boolean())
     .description('Per-model visibility overrides, e.g. {"zai-org/GLM-5.3-Flash": false}.')
     .default({}),
+  showSettingsSection: Schema.boolean()
+    .description(
+      'Add a dedicated river.ai page to the settings navigation. Off by default; '
+      + 'the provider card carries the same controls either way.',
+    )
+    .default(false),
 })
 
 // Every editable field is volatile: the settings form writes them live, and the
@@ -317,6 +331,7 @@ export async function apply(ctx: Context, config: RiverConfig): Promise<void> {
           apiBase: current().apiBase ?? DEFAULT_API_BASE,
           contextWindowLimit: current().contextWindowLimit ?? RIVER_CONTEXT_WINDOW,
           maxOutputTokens: current().maxOutputTokens ?? defaultMaxOutputTokens(),
+          showSettingsSection: current().showSettingsSection ?? false,
         }),
         pool,
         slots: () => slots(current()),

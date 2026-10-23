@@ -28,7 +28,7 @@ context/output limits, per-model reasoning efforts and per-million-token prices.
 ## Install
 
 ```bash
-dsh plugin --profile web add github:ExSchwi/dsh-river-provider#v0.2.0
+dsh plugin --profile web add github:ExSchwi/dsh-river-provider#v0.2.1
 ```
 
 `--profile` is **required** — `dsh plugin` forwards its remaining arguments to pnpm inside
@@ -72,12 +72,17 @@ other providers to keep working — this plugin registers only its own route.
 The package ships a web client, so the provider is configured where you expect it instead of
 in a YAML file:
 
-- **Settings → Models → river** — base URL, the active account, the context/output ceilings
-  and a per-model reasoning default. Without the client, DSH renders one line for an unknown
-  provider layout ("other fields live in cordis.patch.yml"); the card replaces that line.
-- **Settings → river.ai** — the account table: each row shows whether its key resolves and
-  whether it is cooling down, and takes a pasted key. The key is written to the credential
-  store, not to the profile's patch file, which is plain text on disk.
+- **Settings → Models → river** — base URL, the active account, the context/output ceilings,
+  a per-model reasoning default, and the account table. Without the client, DSH renders one
+  line for an unknown provider layout ("other fields live in cordis.patch.yml"); the card
+  replaces that line.
+- **Settings → river.ai** (optional, off by default) — the same account table plus model
+  visibility and routing rules, on its own nav entry. Turn it on with the *设置侧栏页面*
+  switch in the card, or with `showSettingsSection: true` in the patch file. The card keeps
+  working either way, so the page is a preference rather than a requirement.
+
+Keys are pasted in the account table and written to the credential store, not to the
+profile's patch file, which is plain text on disk.
 
 Every write goes through the `river` Remote namespace and lands in `cordis.patch.yml` via the
 settings service, so the file stays the single source of truth and a hand edit is still
@@ -244,6 +249,7 @@ llm-river:
 | `defaultReasoningEffort` | `{}` | Default effort per model id or glob; invalid values error |
 | `visibleModels` | `[]` | Allow-list for the picker |
 | `modelVisibility` | `{}` | Per-model overrides |
+| `showSettingsSection` | `false` | Add the optional river.ai page to the settings nav |
 
 ## Reasoning effort and context as settings
 

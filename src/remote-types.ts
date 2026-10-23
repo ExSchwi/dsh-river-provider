@@ -13,4 +13,6 @@ export interface RiverConfig {
   activeAccount?: string | undefined
   defaultReasoningEffort?: Record<string, string> | undefined
   modelAccountRules?: { models: string[]; account: string }[] | undefined
+  /** Whether the settings navigation shows a dedicated river.ai page. */
+  showSettingsSection?: boolean | undefined
 }

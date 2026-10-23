@@ -58,6 +58,14 @@ interface RiverConfig {
   visibleModels?: string[];
   /** Per-model visibility overrides, applied after `visibleModels`. */
   modelVisibility?: Record<string, boolean>;
+  /**
+   * Whether the settings navigation shows a dedicated river.ai page.
+   *
+   * Off by default: the provider card already carries everything the page does,
+   * and a nav entry nobody asked for is clutter. The page is the better home for
+   * the account table, so it stays one switch away.
+   */
+  showSettingsSection?: boolean;
 }
 declare const RiverConfigSchema: Record<string, unknown>;
 /** Model ids that carry vision, from the bundled snapshot. */

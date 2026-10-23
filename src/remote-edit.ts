@@ -170,6 +170,10 @@ export function patchFor(edit: RiverEdit): Record<string, unknown> {
       })
       return { modelAccountRules: result }
     }
+    case 'showSettingsSection': {
+      if (typeof edit.value !== 'boolean') refuse('showSettingsSection must be true or false.')
+      return { showSettingsSection: edit.value }
+    }
     default: {
       // `edit.field` is validated at the boundary, so this is unreachable.
       refuse(`Unknown setting ${(edit as { field: string }).field}.`)

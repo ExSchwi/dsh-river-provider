@@ -75,6 +75,11 @@ export interface RiverSnapshot {
   }
   /** Models a routing rule pins to an account. */
   modelAccountRules: { models: string[]; account: string }[]
+  /** Client-surface switches, read-only from the page's point of view. */
+  ui: {
+    /** Whether the settings navigation shows a dedicated river.ai page. */
+    showSettingsSection: boolean
+  }
 }
 
 /** The settings-page write verbs. */
@@ -89,6 +94,7 @@ export type RiverEdit =
   | { field: 'visibleModels'; value: string[] }
   | { field: 'accounts'; value: { label?: string; apiKeyEnv?: string; apiKey?: string }[] }
   | { field: 'modelAccountRules'; value: { models: string[]; account: string }[] }
+  | { field: 'showSettingsSection'; value: boolean }
 
 /** Result of a write: the new state, or the reason it was refused. */
 export interface EditOutcome {
@@ -277,6 +283,9 @@ export function parseSnapshot(value: unknown): RiverSnapshot {
       const rule = record(entry, 'rule')
       return { models: strings(rule, 'models', 'rule.models'), account: str(rule, 'account', 'rule.account') }
     }),
+    ui: {
+      showSettingsSection: bool(record(source.ui, 'ui'), 'showSettingsSection', 'ui.showSettingsSection'),
+    },
   }
 }
 
@@ -299,6 +308,7 @@ export function parseCredentialOutcome(value: unknown): CredentialOutcome {
 const EDIT_FIELDS = new Set([
   'apiBase', 'apiKeyEnv', 'activeAccount', 'contextWindowLimit', 'maxOutputTokens',
   'defaultReasoningEffort', 'modelVisibility', 'visibleModels', 'accounts', 'modelAccountRules',
+  'showSettingsSection',
 ])
 
 /** Parse the untrusted `river/edit` argument. */

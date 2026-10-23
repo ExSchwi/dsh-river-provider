@@ -20,7 +20,12 @@ import type { AccountView, ModelView, RiverSnapshot } from './remote-wire.ts'
 export interface SnapshotDeps {
   provider: string
   config: () => RiverConfig
-  defaults: () => { apiBase: string; contextWindowLimit: number; maxOutputTokens: number }
+  defaults: () => {
+    apiBase: string
+    contextWindowLimit: number
+    maxOutputTokens: number
+    showSettingsSection: boolean
+  }
   pool: RiverAccountPool
   slots: () => readonly AccountSlot[]
   isVisible: (model: string) => boolean
@@ -133,5 +138,10 @@ export async function buildSnapshot(deps: SnapshotDeps): Promise<RiverSnapshot> 
       models: [...rule.models],
       account: rule.account,
     })),
+    ui: {
+      // Read from the resolved config rather than from `raw`: the config value
+      // is optional on disk, and the page needs the effective answer.
+      showSettingsSection: defaults.showSettingsSection,
+    },
   }
 }

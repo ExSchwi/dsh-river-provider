@@ -70,6 +70,9 @@ type RiverSnapshot = {
     defaultReasoningEffort: Record<string, string>
   }
   modelAccountRules: { models: string[]; account: string }[]
+  ui: {
+    showSettingsSection: boolean
+  }
 }
 
 type EditField =
@@ -83,6 +86,7 @@ type EditField =
   | 'visibleModels'
   | 'accounts'
   | 'modelAccountRules'
+  | 'showSettingsSection'
 
 type EditOutcome = { ok: boolean; snapshot?: RiverSnapshot; error?: string }
 type CredentialOutcome = { ok: boolean; error?: string }
@@ -223,6 +227,9 @@ function parseSnapshot(value: unknown): RiverSnapshot {
       const rule = record(entry, 'rule')
       return { models: labels(rule, 'models', 'rule.models'), account: text(rule, 'account', 'rule.account') }
     }),
+    ui: {
+      showSettingsSection: flag(record(source.ui, 'ui'), 'showSettingsSection', 'ui.showSettingsSection'),
+    },
   }
 }
 
@@ -493,6 +500,15 @@ const CSS = `
 .rv-notice-ok { color: var(--dsh-success, #4ec9a0); }
 .rv-notice-bad { color: var(--dsh-danger, #e06c75); }
 .rv-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.rv-switchRow { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 12px; border: 1px solid var(--dsh-border, #2e2e2e); border-radius: 7px; }
+.rv-switchText { display: flex; flex-direction: column; gap: 2px; }
+.rv-switch { font: inherit; font-size: 12px; padding: 4px 12px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--dsh-border, #3a3a3a); background: transparent;
+  color: var(--dsh-text-secondary, #8b8b8b); }
+.rv-switchOn { border-color: var(--dsh-accent, #4a9eff); color: var(--dsh-accent, #4a9eff);
+  background: color-mix(in srgb, var(--dsh-accent, #4a9eff) 14%, transparent); }
+.rv-switch:disabled { cursor: default; opacity: .5; }
 .rv-button { font: inherit; font-size: 12px; padding: 5px 12px; border-radius: 6px; cursor: pointer;
   border: 1px solid var(--dsh-border, #3a3a3a); background: var(--dsh-button-background, #2a2a2a);
   color: var(--dsh-text, #e6e6e6); }
@@ -522,6 +538,30 @@ function injectCss(): void {
 
 function Pill({ kind, children }: { kind: 'ok' | 'bad' | 'muted' | 'warn'; children?: Node }): Node {
   return h('span', { className: `rv-badge rv-${kind}` }, h('span', { className: 'rv-dot' }), children)
+}
+
+/** An on/off row. The value comes from the host, so a click is a write. */
+function SwitchRow(props: {
+  label: string
+  hint: string
+  value: boolean
+  disabled: boolean
+  onCommit: (value: boolean) => void
+}): Node {
+  return h('div', { className: 'rv-switchRow' },
+    h('div', { className: 'rv-switchText' },
+      h('span', { className: 'rv-label' }, props.label),
+      h('span', { className: 'rv-sub' }, props.hint),
+    ),
+    h('button', {
+      type: 'button',
+      className: `rv-switch${props.value ? ' rv-switchOn' : ''}`,
+      role: 'switch',
+      'aria-checked': props.value ? 'true' : 'false',
+      disabled: props.disabled,
+      onClick: () => props.onCommit(!props.value),
+    }, props.value ? '已开启' : '已关闭'),
+  )
 }
 
 function AccountStatus({ account }: { account: AccountView }): Node {
@@ -683,6 +723,30 @@ function RiverProviderCard(): Node {
       h('p', { className: 'rv-hint' }, '这里只列出 river 每个模型真正接受的档位；「自动」表示不干预，交给模型默认值。'),
     ),
 
+    h('div', { className: 'rv-section' },
+      h('span', { className: 'rv-sectionTitle' }, '账号'),
+      h('table', { className: 'rv-table' },
+        h('thead', {},
+          h('tr', {},
+            h('th', {}, '账号'),
+            h('th', {}, '凭据引用'),
+            h('th', {}, '状态'),
+            h('th', {}, ''),
+          )),
+        h('tbody', {},
+          snapshot.accounts.map((account) => h(AccountRow, { key: account.id, account, disabled })),
+        ),
+      ),
+    ),
+
+    h(SwitchRow, {
+      label: '设置侧栏页面',
+      hint: '在设置导航里加一个 river.ai 页（还包含模型可见性与路由）；关掉后本卡片仍可管理账号',
+      value: snapshot.ui.showSettingsSection,
+      disabled,
+      onCommit: (value: boolean) => void store.edit('showSettingsSection', value),
+    }),
+
     state.notice === '' ? null : h('p', { className: `rv-notice ${state.noticeOk ? 'rv-notice-ok' : 'rv-notice-bad'}` }, state.notice),
 
     h('div', { className: 'rv-actions' },
@@ -692,7 +756,9 @@ function RiverProviderCard(): Node {
         disabled,
         onClick: () => void store.refresh(),
       }, state.status === 'loading' ? '刷新中…' : '刷新'),
-      h('span', { className: 'rv-sub' }, '账号增删与路由规则在「设置 → river.ai」页'),
+      h('span', { className: 'rv-sub' }, snapshot.ui.showSettingsSection
+        ? '模型可见性与路由规则在「设置 → river.ai」页'
+        : '模型可见性与路由规则写在 cordis.patch.yml 的 llm-river 段'),
     ),
   )
 }
@@ -977,6 +1043,62 @@ function connectRemote(ctx: ClientContext): () => void {
   }
 }
 
+/**
+ * Publish the settings page only while the switch is on.
+ *
+ * The switch is a host setting, so its value is unknown at load time and the
+ * registration cannot be unconditional. `slots.inject` is still used for the
+ * first registration because registering into a slot nobody declared yet
+ * throws; after that the slot exists and the disposer lets the nav entry come
+ * and go with the switch.
+ */
+function attachSettingsSection(ctx: ClientContext): void {
+  let dispose: (() => void) | undefined
+  let declared = false
+  let wanted = false
+
+  const sync = (): void => {
+    if (wanted && declared && dispose === undefined) {
+      dispose = ctx.slots.register({
+        name: 'settings.section',
+        id: 'river',
+        order: 13,
+        label: () => 'river.ai',
+      }, RiverSettingsPage) as () => void
+      return
+    }
+    if (!wanted && dispose !== undefined) {
+      dispose()
+      dispose = undefined
+    }
+  }
+
+  ctx.effect(() => {
+    const unsubscribe = store.subscribe(() => {
+      const enabled = store.state().snapshot?.ui.showSettingsSection ?? false
+      if (enabled === wanted) return
+      wanted = enabled
+      sync()
+    })
+    return () => {
+      unsubscribe()
+      if (dispose !== undefined) {
+        dispose()
+        dispose = undefined
+      }
+    }
+  }, 'dsh-river-provider: settings page switch')
+
+  try {
+    ctx.slots.inject('settings.section', () => {
+      declared = true
+      sync()
+    })
+  } catch (error) {
+    ctx.logger.warn(`river: could not watch the settings section slot: ${String(error)}`)
+  }
+}
+
 export function apply(ctx: ClientContext): void {
   injectCss()
   ctx.effect(() => connectRemote(ctx), 'dsh-river-provider: settings Remote')
@@ -994,16 +1116,7 @@ export function apply(ctx: ClientContext): void {
     ctx.logger.warn(`river: could not register the provider card: ${String(error)}`)
   }
 
-  try {
-    ctx.slots.inject('settings.section', () => ctx.slots.register({
-      name: 'settings.section',
-      id: 'river',
-      order: 13,
-      label: () => 'river.ai',
-    }, RiverSettingsPage))
-  } catch (error) {
-    ctx.logger.warn(`river: could not register the settings section: ${String(error)}`)
-  }
+  attachSettingsSection(ctx)
 }
 
 export const inject = ['slots', 'remote']
