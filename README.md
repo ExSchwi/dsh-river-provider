@@ -28,7 +28,7 @@ context/output limits, per-model reasoning efforts and per-million-token prices.
 ## Install
 
 ```bash
-dsh plugin --profile web add github:ExSchwi/dsh-river-provider#v0.2.2
+dsh plugin --profile web add github:ExSchwi/dsh-river-provider#v0.2.3
 ```
 
 `--profile` is **required** — `dsh plugin` forwards its remaining arguments to pnpm inside
@@ -296,8 +296,8 @@ plugin is tested against.
 
 ```bash
 npm run typecheck
-npm test                     # 64 offline tests, no network
-npx tsdown                   # build lib/
+npm test                     # 66 offline tests, no network
+npm run build                # tsc -> lib/ (host), tsdown -> lib/client.js, then check:dist
 ```
 
 Two opt-in tools hit the real API and are never part of `npm test`:
