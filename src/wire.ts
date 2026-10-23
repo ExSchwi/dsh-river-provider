@@ -8,7 +8,8 @@
  *
  *  - `reasoning_effort` is per-model, and DeepSeek has no `low`. An unknown
  *    effort is snapped to the nearest accepted one instead of being forwarded
- *    verbatim (river answers 400 for an out-of-whitelist value).
+ *    verbatim (river answers 400 for an out-of-whitelist value), and `off` is
+ *    sent by OMITTING the field rather than as a literal enum member.
  *  - Cached prompt tokens are reported separately by river, so the harness's
  *    `inputTokens` must be `prompt_tokens - cached`; that happens on the way
  *    back, in `stream-decoder.ts`.
@@ -23,7 +24,7 @@ import type { ContentBlock, GenerateOptions, ToolSchema } from '@deepseek-ai/dsh
 import { fileHandleText, offloadedImageText, requestImageHandleText, textOnlyImageText } from '@deepseek-ai/dsh-llm'
 import type { ImageAttachmentRef, RequestImageAttachment } from '@deepseek-ai/dsh-attachment'
 import { bilingual, isOutputLimitDetail } from './provider-errors.ts'
-import { translateEffort } from './capabilities.ts'
+import { wireEffort } from './capabilities.ts'
 import { isRecord } from './wire-guards.ts'
 
 /** river's documented request-body ceiling, including base64 image payloads. */
@@ -122,11 +123,11 @@ export async function buildRequest(input: RequestInput): Promise<ChatCompletions
   if (input.topP !== undefined) body.top_p = input.topP
   if (input.stop !== undefined && input.stop.length > 0) body.stop = [...input.stop]
 
-  const effort = input.reasoningEffort === undefined ? undefined : translateEffort(input.model, input.reasoningEffort)
+  // `off` carries no wire value at all: the field is omitted, which river reads
+  // as "do not reason" on every route. Sending the literal `none` instead would
+  // be a model-specific enum member, and a gateway in front may reject it.
+  const effort = wireEffort(input.model, input.reasoningEffort)
   if (effort !== undefined) body.reasoning_effort = effort
-  // GLM-5.3-Flash only reasons; DeepSeek defaults to `high` server-side. Sending
-  // `none` explicitly is how a caller switches reasoning off on DeepSeek, which
-  // is why an undefined effort is left absent rather than defaulted here.
 
   if (input.tools !== undefined && input.tools.length > 0) {
     body.tools = input.tools.map((tool) => ({

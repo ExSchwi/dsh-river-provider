@@ -28,7 +28,7 @@ context/output limits, per-model reasoning efforts and per-million-token prices.
 ## Install
 
 ```bash
-dsh plugin --profile web add github:ExSchwi/dsh-river-provider#v0.1.0
+dsh plugin --profile web add github:ExSchwi/dsh-river-provider#v0.2.0
 ```
 
 `--profile` is **required** — `dsh plugin` forwards its remaining arguments to pnpm inside
@@ -66,6 +66,23 @@ other providers to keep working — this plugin registers only its own route.
 > Restart is mandatory and a restart is not a reload: a session's context budget is fixed
 > when the session is created, so an already-open conversation keeps the old limits. Open a
 > new session to see the plugin's models.
+
+## Settings in the GUI
+
+The package ships a web client, so the provider is configured where you expect it instead of
+in a YAML file:
+
+- **Settings → Models → river** — base URL, the active account, the context/output ceilings
+  and a per-model reasoning default. Without the client, DSH renders one line for an unknown
+  provider layout ("other fields live in cordis.patch.yml"); the card replaces that line.
+- **Settings → river.ai** — the account table: each row shows whether its key resolves and
+  whether it is cooling down, and takes a pasted key. The key is written to the credential
+  store, not to the profile's patch file, which is plain text on disk.
+
+Every write goes through the `river` Remote namespace and lands in `cordis.patch.yml` via the
+settings service, so the file stays the single source of truth and a hand edit is still
+honoured. Reasoning choices are DSH's own levels — `off`, `high`, `max` for the DeepSeek
+models — and the picker only offers what that model accepts.
 
 ## Accounts
 
@@ -134,12 +151,20 @@ prefill.
 `reasoning_effort` is validated per model before the request is sent, because river.ai
 rejects a value a model does not support:
 
-| Model | Accepted efforts |
-| --- | --- |
-| `deepseek-ai/DeepSeek-V4.1-Flash-1017` | `none`, `high`, `max` |
-| `deepseek-ai/DeepSeek-V4.1-Flash` | `none`, `high`, `max` |
-| `zai-org/GLM-5.3-Flash` | `low`, `high`, `max` (always reasoning) |
-| `nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4` | none — no published table |
+The levels are DSH's own vocabulary (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`,
+`max`), so a value chosen in one provider's picker means the same thing here. Only the
+levels each model really accepts are offered:
+
+| Model | Accepted efforts | Wire value `off` becomes |
+| --- | --- | --- |
+| `deepseek-ai/DeepSeek-V4.1-Flash-1017` | `off`, `high`, `max` | field omitted |
+| `deepseek-ai/DeepSeek-V4.1-Flash` | `off`, `high`, `max` | field omitted |
+| `zai-org/GLM-5.3-Flash` | `low`, `high`, `max` (always reasoning) | — no `off` at all |
+| `nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4` | none — no published table | — |
+
+`off` is a harness level, not a river one: river spells it `none`, and sending `none`
+explicitly is not the same as leaving the field out. This plugin omits `reasoning_effort`
+entirely, which is what "no reasoning" means on the wire.
 
 No river model accepts `medium`. The picker offers exactly what the table lists and nothing
 else, so a level that would be a `400` cannot be chosen in the first place. Two different
@@ -151,7 +176,7 @@ paths meet the rest of that wall:
   costs, on every turn, with nothing to notice.
 - **A per-turn request** from the harness may carry an alias river has never heard of
   (`minimal`, `xhigh`, `ultra`). Those are translated to the nearest supported level,
-  cheaper side on a tie: a caller asking for `low` on DeepSeek gets `none`, not `high`.
+  cheaper side on a tie: a caller asking for `low` on DeepSeek gets `off`, not `high`.
 
 Reasoning text arrives as a thinking block ahead of the answer rather than being glued onto
 it.
@@ -246,8 +271,8 @@ keeps its own default rather than inheriting another model's.
 
 The value is checked against that model's whitelist and, unlike a per-turn request, it is
 never snapped: `low` on a DeepSeek model raises
-`DeepSeek-V4.1-Flash accepts only none|high|max for reasoning_effort, not "low"` instead of
-quietly becoming `none`. Naming a model the snapshot does not know yet is rejected the same
+`DeepSeek-V4.1-Flash accepts only off|high|max for reasoning_effort, not "low"` instead of
+quietly becoming `off`. Naming a model the snapshot does not know yet is rejected the same
 way — there is no whitelist to validate against until the snapshot lists it.
 
 `contextWindowLimit` is the ceiling for the window advertised to the harness, which is
@@ -265,7 +290,7 @@ plugin is tested against.
 
 ```bash
 npm run typecheck
-npm test                     # 62 offline tests, no network
+npm test                     # 64 offline tests, no network
 npx tsdown                   # build lib/
 ```
 

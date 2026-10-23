@@ -63,7 +63,7 @@ export const KNOWN_MODELS: Readonly<Record<string, RiverModelFacts>> = {
     contextWindow: RIVER_CONTEXT_WINDOW,
     maxOutputTokens: 384_000,
     vision: true,
-    efforts: ['none', 'high', 'max'],
+    efforts: ['off', 'high', 'max'],
     defaultEffort: 'high',
     price: { input: 0.12, cachedInput: 0.0024, output: 0.48 },
     reasoningStyle: 'leading',
@@ -72,7 +72,7 @@ export const KNOWN_MODELS: Readonly<Record<string, RiverModelFacts>> = {
     contextWindow: RIVER_CONTEXT_WINDOW,
     maxOutputTokens: 384_000,
     vision: true,
-    efforts: ['none', 'high', 'max'],
+    efforts: ['off', 'high', 'max'],
     defaultEffort: 'high',
     price: { input: 0.12, cachedInput: 0.0024, output: 0.48 },
     reasoningStyle: 'leading',
@@ -81,7 +81,7 @@ export const KNOWN_MODELS: Readonly<Record<string, RiverModelFacts>> = {
     contextWindow: RIVER_CONTEXT_WINDOW,
     maxOutputTokens: 128_000,
     vision: true,
-    // GLM reasons unconditionally: `none` is not an accepted value at all.
+    // GLM reasons unconditionally: `off` is not an accepted level at all.
     efforts: ['low', 'high', 'max'],
     defaultEffort: 'high',
     price: { input: 0.12, cachedInput: 0.024, output: 0.4 },
@@ -147,6 +147,23 @@ export function displayName(model: string): string {
   return tail === '' ? model : tail
 }
 
+/**
+ * The largest output budget any snapshot model allows.
+ *
+ * The settings form needs one number to show when nothing is configured. It is
+ * the ceiling rather than a conservative middle: a configured budget is a
+ * REQUEST, and river rejects one above a model's limit, so the honest default is
+ * the highest figure the catalog states — with the per-model table beside it
+ * holding the rest of the truth.
+ */
+export function knownMaxOutputTokens(): number {
+  let largest = 0
+  for (const facts of Object.values(KNOWN_MODELS)) {
+    if (facts.maxOutputTokens > largest) largest = facts.maxOutputTokens
+  }
+  return largest
+}
+
 /** The reasoning efforts to offer for one model, in harness order. */
 export function reasoningEffortsFor(model: string): LlmReasoningEffortInfo[] {
   const facts = modelFacts(model)
@@ -161,10 +178,12 @@ export function reasoningEffortsFor(model: string): LlmReasoningEffortInfo[] {
 /** Human names for effort levels. */
 function effortName(id: string): string {
   switch (id) {
-    case 'none': return 'No reasoning'
+    case 'off': return 'Off'
+    case 'minimal': return 'Minimal'
     case 'low': return 'Low'
     case 'medium': return 'Medium'
     case 'high': return 'High'
+    case 'xhigh': return 'Extra high'
     case 'max': return 'Maximum'
     default: return id
   }
@@ -173,7 +192,7 @@ function effortName(id: string): string {
 /** Explanations shown next to each effort. */
 function effortDescription(id: string): string | undefined {
   switch (id) {
-    case 'none': return 'Answer directly; reasoning tokens are not generated.'
+    case 'off': return 'Answer directly; no reasoning is requested.'
     case 'low': return 'Short reasoning pass.'
     case 'high': return 'Default reasoning budget.'
     case 'max': return 'Longest reasoning budget; billed as output.'
@@ -182,20 +201,23 @@ function effortDescription(id: string): string | undefined {
 }
 
 /** The harness's ordered effort ladder, used to snap an unsupported value. */
-const EFFORT_LADDER: readonly string[] = ['none', 'low', 'medium', 'high', 'max']
+const EFFORT_LADDER: readonly string[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
 
 /**
- * Normalize harness spellings onto river's vocabulary.
+ * Normalize a requested effort onto the harness's own level ids.
  *
- * The harness has grown aliases over time (`off`, `minimal`, `xhigh`, `ultra`);
- * river knows five words, so a direct forward of `ultra` would be a 400.
+ * The ids this reports are the HARNESS vocabulary (`off|minimal|low|medium|
+ * high|xhigh|max`), not river's wire values, because the ids travel to the
+ * model picker and the settings form: an id outside that list has no label
+ * there, so the UI falls back to printing the raw id. Older harness spellings
+ * and river's own words are accepted on input and folded onto the ladder.
  */
 export function canonicalEffort(requested: string): string {
   switch (requested) {
-    case 'off': return 'none'
-    case 'minimal': return 'low'
-    case 'xhigh':
-    case 'extra-high': return 'high'
+    case 'none': return 'off'
+    case 'null': return 'off'
+    case 'minimal': return 'minimal'
+    case 'extra-high': return 'xhigh'
     case 'ultra':
     case 'maximum': return 'max'
     default: return requested
@@ -209,8 +231,8 @@ export function canonicalEffort(requested: string): string {
  * nearest supported level, choosing the CHEAPER direction on a tie.
  *
  * The tie-break is a cost decision, not cosmetics: a caller asking for `low` on
- * a DeepSeek model (which accepts only `none|high|max`) is one step from both
- * `none` and `high`, and rounding UP spends real reasoning tokens on a level the
+ * a DeepSeek model (which accepts only `off|high|max`) is one step from both
+ * `off` and `high`, and rounding UP spends real reasoning tokens on a level the
  * caller did not ask for. Rounded down, the request is cheaper and still close.
  * Ties compare rank on {@link EFFORT_LADDER}, which orders the vocabulary from
  * least to most expensive.
@@ -240,6 +262,20 @@ export function translateEffort(model: string, requested: string | undefined): s
     }
   }
   return best?.effort ?? facts.defaultEffort
+}
+
+/**
+ * The `reasoning_effort` value to put on the wire, or undefined for none.
+ *
+ * `off` means "do not reason", and the field is then OMITTED rather than sent as
+ * the string `"none"`: river spells that choice per model (DeepSeek accepts
+ * `none`), and an ABSENT field is understood identically by every route and by
+ * any OpenAI-compatible gateway in front of it.
+ */
+export function wireEffort(model: string, requested: string | undefined): string | undefined {
+  const resolved = translateEffort(model, requested)
+  if (resolved === undefined || resolved === 'off') return undefined
+  return resolved
 }
 
 /**
@@ -346,7 +382,7 @@ function matchesPattern(model: string, pattern: string): boolean {
 export function titleEffort(model: string): string | undefined {
   const facts = modelFacts(model)
   if (facts.efforts.length === 0) return undefined
-  if (facts.efforts.includes('none')) return 'none'
+  if (facts.efforts.includes('off')) return 'off'
   return facts.efforts[0]
 }
 

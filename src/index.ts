@@ -19,6 +19,7 @@ import { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-settings'
+import type {} from '@deepseek-ai/dsh-typert-protocol'
 import { credentialRef, type CredentialProvider } from '@deepseek-ai/dsh-credentials'
 import {
   DEFAULT_API_BASE,
@@ -36,10 +37,13 @@ import {
   type AccountSlot,
   type ResolvedAccount,
 } from './accounts.ts'
-import { configuredEffort } from './capabilities.ts'
+import { configuredEffort, knownMaxOutputTokens, RIVER_CONTEXT_WINDOW } from './capabilities.ts'
 import { RiverPriceBook } from './model-prices.ts'
 import { AttachmentImageResolver } from './images.ts'
 import { markVolatileFields } from './config-volatile.ts'
+import { buildSnapshot } from './remote-state.ts'
+import { applyEdit, storeAccountKey, type EditDeps } from './remote-edit.ts'
+import { RiverRemoteService, type RiverRemoteDeps } from './remote-service.ts'
 
 export const name = 'llm-river'
 export const inject = ['llm']
@@ -245,6 +249,30 @@ export async function apply(ctx: Context, config: RiverConfig): Promise<void> {
   const defaultEffort = (model: string): string | undefined =>
     configuredEffort(model, current().defaultReasoningEffort)
 
+  /**
+   * The output budget the page shows when none is configured.
+   *
+   * The largest figure the snapshot knows is the honest answer to "what would
+   * this cost me": river's models differ (384K vs 128K) and a single global
+   * default can only claim one, so the form shows the ceiling with the model
+   * table beside it holding the per-model truth.
+   */
+  const defaultMaxOutputTokens = (): number => knownMaxOutputTokens()
+
+  /**
+   * Whether a key resolves for one reference, through the same seam the adapter
+   * reads. A failure reads as "not configured": the row still renders, with the
+   * reason a user needs to see.
+   */
+  const isConfigured = async (ref: string): Promise<boolean> => {
+    try {
+      const resolved = await resolveRef(ref)
+      return (resolved ?? '').trim() !== ''
+    } catch {
+      return false
+    }
+  }
+
   const isVisible = (model: string): boolean => {
     const raw = current()
     const override = raw.modelVisibility?.[model]
@@ -274,6 +302,63 @@ export async function apply(ctx: Context, config: RiverConfig): Promise<void> {
     { provider: PROVIDER, displayName: 'river.ai', settingsNs: NS, settingsPath: [] },
   ])
   ctx.llm.registerAdapter([PROVIDER], adapter)
+
+  // The Remote the settings page talks to. Both halves come from remote-wire.ts,
+  // so the endpoint the Client calls is the one the Gateway registered.
+  const remoteDeps: RiverRemoteDeps = {
+    snapshot: async () => {
+      // Prices and the catalog are stale-while-revalidate: the page renders
+      // immediately and a refresh lands on the next poll.
+      void prices.refresh()
+      return buildSnapshot({
+        provider: PROVIDER,
+        config: () => current(),
+        defaults: () => ({
+          apiBase: current().apiBase ?? DEFAULT_API_BASE,
+          contextWindowLimit: current().contextWindowLimit ?? RIVER_CONTEXT_WINDOW,
+          maxOutputTokens: current().maxOutputTokens ?? defaultMaxOutputTokens(),
+        }),
+        pool,
+        slots: () => slots(current()),
+        isVisible,
+        isConfigured,
+      })
+    },
+    async refresh() {
+      await prices.refresh()
+      return remoteDeps.snapshot()
+    },
+    async edit(edit) {
+      const editDeps: EditDeps = {
+        ns: NS,
+        settings: () => ctx.get('settings'),
+        credentials: () => ctx.get('credentials'),
+      }
+      try {
+        await applyEdit(editDeps, edit)
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) }
+      }
+      return { ok: true, snapshot: await remoteDeps.snapshot() }
+    },
+    async setAccountKey(target) {
+      const editDeps: EditDeps = {
+        ns: NS,
+        settings: () => ctx.get('settings'),
+        credentials: () => ctx.get('credentials'),
+      }
+      try {
+        await storeAccountKey(editDeps, target)
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) }
+      }
+      return { ok: true }
+    },
+  }
+  // Constructing the receiver registers the Cordis service the Gateway resolves
+  // and exports the methods marked on it. The same instance is the one the
+  // Gateway calls, so the deps above and the served answers cannot drift.
+  new RiverRemoteService(ctx, remoteDeps)
 
   // Settings: the panel edits the same object the adapter reads, so a base URL
   // change takes effect on the next attempt without a plugin reload. The

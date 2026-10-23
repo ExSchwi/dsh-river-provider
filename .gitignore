@@ -4,6 +4,9 @@ node_modules/
 # npm pack output
 *.tgz
 
+# Build output (tracked only for lib/client.js, see below)
+lib/*.map
+
 # Local tooling state
 .dsh/
 *.local

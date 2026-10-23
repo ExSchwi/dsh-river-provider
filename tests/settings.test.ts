@@ -47,16 +47,16 @@ test('the output budget stays under the model maximum', () => {
 })
 
 test('a configured effort the model rejects is an error, not a silent snap', () => {
-  // DeepSeek accepts only none|high|max. A `low` here would have snapped down to
-  // `none`, quietly changing both behaviour and cost on every turn.
+  // DeepSeek accepts only off|high|max. A `low` here would have snapped down to
+  // `off`, quietly changing both behaviour and cost on every turn.
   assert.throws(
     () => configuredEffort(DEEPSEEK, { [DEEPSEEK]: 'low' }),
-    /accepts only none\|high\|max for reasoning_effort, not "low"/,
+    /accepts only off\|high\|max for reasoning_effort, not "low"/,
   )
-  // GLM accepts only low|high|max; `none` is not a cheaper GLM, it is invalid.
+  // GLM accepts only low|high|max; `off` is not a cheaper GLM, it is invalid.
   assert.throws(
-    () => configuredEffort(GLM, { [GLM]: 'none' }),
-    /accepts only low\|high\|max for reasoning_effort, not "none"/,
+    () => configuredEffort(GLM, { [GLM]: 'off' }),
+    /accepts only low\|high\|max for reasoning_effort, not "off"/,
   )
   // No river model accepts `medium` — documented for both families.
   assert.throws(() => configuredEffort(DEEPSEEK, { [DEEPSEEK]: 'medium' }), RangeError)
@@ -66,7 +66,7 @@ test('a configured effort the model rejects is an error, not a silent snap', () 
 
 test('an accepted configured effort is returned verbatim', () => {
   assert.equal(configuredEffort(DEEPSEEK, { [DEEPSEEK]: 'high' }), 'high')
-  assert.equal(configuredEffort(DEEPSEEK, { [DEEPSEEK]: 'none' }), 'none')
+  assert.equal(configuredEffort(DEEPSEEK, { [DEEPSEEK]: 'off' }), 'off')
   assert.equal(configuredEffort(GLM, { [GLM]: 'low' }), 'low')
   assert.equal(configuredEffort(GLM, { [GLM]: 'max' }), 'max')
 })

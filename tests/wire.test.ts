@@ -27,17 +27,20 @@ import {
   streamErrorToLlmError,
 } from '../src/provider-errors.ts'
 import { findLivePrice, parseLivePrices, priceUsage } from '../src/model-prices.ts'
+import { wireEffort } from '../src/capabilities.ts'
 
 test('every model exposes river\'s own effort whitelist', () => {
-  assert.deepEqual(modelFacts('deepseek-ai/DeepSeek-V4.1-Flash-1017').efforts, ['none', 'high', 'max'])
+  // Ids are the HARNESS ladder, so the picker and the settings form label them:
+  // `none` used to leak here, and the UI could only print the raw word.
+  assert.deepEqual(modelFacts('deepseek-ai/DeepSeek-V4.1-Flash-1017').efforts, ['off', 'high', 'max'])
   assert.deepEqual(modelFacts('zai-org/GLM-5.3-Flash').efforts, ['low', 'high', 'max'])
 })
 
 test('effort translation never emits a value the model rejects', () => {
-  // DeepSeek has no `low`: `low` sits between `none` and `high`, and the tie
-  // resolves CHEAPER, so the request degrades to `none` rather than `high`.
-  assert.equal(translateEffort('deepseek-ai/DeepSeek-V4.1-Flash', 'low'), 'none')
-  // `medium` is one step from `high` and two from `none`: nearest wins.
+  // DeepSeek has no `low`: `low` sits between `off` and `high`, and the tie
+  // resolves CHEAPER, so the request degrades to `off` rather than `high`.
+  assert.equal(translateEffort('deepseek-ai/DeepSeek-V4.1-Flash', 'low'), 'off')
+  // `medium` is one step from `high` and three from `off`: nearest wins.
   assert.equal(translateEffort('deepseek-ai/DeepSeek-V4.1-Flash', 'medium'), 'high')
   assert.equal(translateEffort('zai-org/GLM-5.3-Flash', 'medium'), 'low')
   // A level the model serves passes through untouched.
@@ -47,15 +50,15 @@ test('effort translation never emits a value the model rejects', () => {
 })
 
 test('GLM keeps reasoning on machine-shaped calls', () => {
-  // `none` is not in GLM's whitelist, so a title call gets its lowest real level.
+  // `off` is not in GLM's whitelist, so a title call gets its lowest real level.
   assert.equal(titleEffort('zai-org/GLM-5.3-Flash'), 'low')
-  assert.equal(titleEffort('deepseek-ai/DeepSeek-V4.1-Flash'), 'none')
+  assert.equal(titleEffort('deepseek-ai/DeepSeek-V4.1-Flash'), 'off')
 })
 
 test('reasoning info is branded and ordered', () => {
   const efforts = reasoningEffortsFor('deepseek-ai/DeepSeek-V4.1-Flash')
-  assert.deepEqual(efforts.map((effort) => String(effort.id)), ['none', 'high', 'max'])
-  assert.deepEqual(efforts.map((effort) => effort.name), ['No reasoning', 'High', 'Maximum'])
+  assert.deepEqual(efforts.map((effort) => String(effort.id)), ['off', 'high', 'max'])
+  assert.deepEqual(efforts.map((effort) => effort.name), ['Off', 'High', 'Maximum'])
 })
 
 test('the static snapshot covers every documented model', () => {
@@ -160,4 +163,16 @@ test('a 429 waits for the server\'s own Retry-After', () => {
   assert.equal(error.code, 'RATE_LIMIT')
   assert.equal(error.failure.providerRetryAfterMs, 12_000)
   assert.equal(isAccountScopedFailure(error.failure), true)
+})
+
+test('off travels as an absent field, never as the literal `none`', () => {
+  // `off` is the harness word for "do not reason". River reads an ABSENT
+  // reasoning_effort the same way on every route, whereas the string `none` is a
+  // model-specific enum member that another gateway in front may reject.
+  assert.equal(wireEffort('deepseek-ai/DeepSeek-V4.1-Flash', 'off'), undefined)
+  assert.equal(wireEffort('deepseek-ai/DeepSeek-V4.1-Flash', 'none'), undefined)
+  assert.equal(wireEffort('deepseek-ai/DeepSeek-V4.1-Flash', 'high'), 'high')
+  assert.equal(wireEffort('deepseek-ai/DeepSeek-V4.1-Flash', 'max'), 'max')
+  // GLM cannot switch reasoning off, so `off` degrades to its cheapest level.
+  assert.equal(wireEffort('zai-org/GLM-5.3-Flash', 'off'), 'low')
 })
