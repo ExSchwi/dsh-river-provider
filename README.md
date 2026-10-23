@@ -28,11 +28,19 @@ context/output limits, per-model reasoning efforts and per-million-token prices.
 ## Install
 
 ```bash
-dsh plugin add github:ExSchwi/dsh-river-provider#v0.1.0
+dsh plugin --profile web add github:ExSchwi/dsh-river-provider#v0.1.0
 ```
+
+`--profile` is **required** — `dsh plugin` forwards its remaining arguments to pnpm inside
+that profile, and DSH refuses to guess which profile you meant. Substitute your profile name
+(`web`, `tui`, …) for `web`.
 
 `dsh plugin add` records the package in the profile's `dependencies` and `dsh.profile.bundles`
 and lets DSH compose the bundle layer itself — do not hand-edit those files.
+
+The repo ships a prebuilt `lib/`, so the install needs no build step and pnpm never asks you
+to allowlist a build script. (If you install from a source checkout instead, `npm run build`
+first — `lib/` is the only entry point, `src/` is not shipped.)
 
 The package ships a `cordis.patch.yml`, so installing it inserts its plugin row
 automatically:
@@ -54,6 +62,10 @@ dsh config set llm-river.apiKeyEnv RIVERAI_API_KEY
 
 The model picker then lists `river` models. Nothing about the provider is required for
 other providers to keep working — this plugin registers only its own route.
+
+> Restart is mandatory and a restart is not a reload: a session's context budget is fixed
+> when the session is created, so an already-open conversation keeps the old limits. Open a
+> new session to see the plugin's models.
 
 ## Accounts
 
