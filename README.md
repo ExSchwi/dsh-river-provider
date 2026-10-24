@@ -1,318 +1,126 @@
-# dsh-river-provider
+# river.ai provider for DeepSeek Harness
 
-A DeepSeek Harness provider plugin for [river.ai](https://docs.river.ai/) built around one
-problem the stock OpenAI-compatible path ignores: **you have more than one river.ai key.**
+把 river.ai 的 chat/completions 接口接成 DeepSeek Harness 的 `river` provider。一个插件同时管多个 key, 请求在账号之间轮转, 429 冷却, 401 停用。
 
-Every request picks a usable account on its own, a rejected key is parked with a reason
-instead of being retried forever, and the model picker gets a live catalog with real
-context/output limits, per-model reasoning efforts and per-million-token prices.
-
-- Provider id: `river`
-- Endpoint: `https://api.river.ai/v1` (Chat Completions, streaming)
-- Requires DSH `0.2.1-rc.2`
-
-## Why not just the OpenAI-compatible provider
-
-`dsh-llm-pi-ai` pointed at river.ai works for one key. It cannot do any of this:
-
-| Gap on the generic path | What this plugin does |
-| --- | --- |
-| One key per provider row — N accounts means N providers and a manual switch | One row, unlimited accounts, automatic rotation |
-| A rate-limited key keeps getting picked, so a turn fails until you edit config | Rejected keys are marked (window / throttle / auth) and skipped |
-| `reasoning_effort` is passed through blindly | Per-model whitelists (`DeepSeek-V4.1-Flash` has no `low`; `GLM-5.3-Flash` needs one) |
-| No `reasoning_content` handling | `reasoning_content` becomes a reasoning block, `content` a text block |
-| Context/output sizes guessed or hardcoded | Real limits from the bundled catalog + live `/v1/models` |
-| Cost unknown | Per-million prices, including cached input, refreshed from the console |
-| A 429 loses the whole turn | `Retry-After` becomes `providerRetryAfterMs`, so the harness waits instead of failing |
-
-## Install
+## 安装
 
 ```bash
 dsh plugin --profile web add github:ExSchwi/dsh-river-provider#v0.2.4
 ```
 
-`--profile` is **required** — `dsh plugin` forwards its remaining arguments to pnpm inside
-that profile, and DSH refuses to guess which profile you meant. Substitute your profile name
-(`web`, `tui`, …) for `web`.
+装完重启 `dsh web`。插件注册的 provider id 是 `river`, 显示名 `river.ai`。
 
-`dsh plugin add` records the package in the profile's `dependencies` and `dsh.profile.bundles`
-and lets DSH compose the bundle layer itself — do not hand-edit those files.
+第一步的 key 来自凭据引用 `RIVERAI_API_KEY`, 写在 `dsh` 的 `.credentials.yaml` 里或同名环境变量里。第二个账号往上从 `accounts` 配置。
 
-The repo ships a prebuilt `lib/`, so the install needs no build step and pnpm never asks you
-to allowlist a build script. (If you install from a source checkout instead, `npm run build`
-first — `lib/` is the only entry point, `src/` is not shipped.)
+## 用法
 
-The package ships a `cordis.patch.yml`, so installing it inserts its plugin row
-automatically:
+在模型选择器里选 `river.ai` 下的模型, 或直接写 provider 与模型 id:
 
 ```yaml
-- insert:
-    - id: llm-river
-      name: "@mars-sea/dsh-river-provider"
-      config:
-        apiKeyEnv: RIVERAI_API_KEY
+- id: agent-default-model
+  config:
+    provider: river
+    model: deepseek-ai/DeepSeek-V4.1-Flash-1017
+    reasoningEffort: high
 ```
 
-Restart DSH afterwards. Then set the credential and enable the provider:
+仓库内置四个模型的真实上限与档位 (`src/capabilities.ts`):
+
+| 模型 id | 上下文 | 输出上限 | 推理档位 |
+| --- | --- | --- | --- |
+| `deepseek-ai/DeepSeek-V4.1-Flash-1017` | 1,048,576 | 384,000 | off / high / max |
+| `deepseek-ai/DeepSeek-V4.1-Flash` | 1,048,576 | 384,000 | off / high / max |
+| `zai-org/GLM-5.3-Flash` | 1,048,576 | 128,000 | low / high / max |
+| `nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4` | 1,048,576 | 128,000 | 无 |
+
+推理档位只列 river 每个模型真正接受的值: 选中 `off` 时不发 `reasoning_effort` 字段, 选中其它值原样发送。GLM 不提供 `off`, 因为它的接口要求每次都带档位。Nemotron 的文档没有档位表, 所以列表为空, 也不发该字段。
+
+模型 id 一个字符都不改写, 改了 river 就认不出来。显示名同样来自 river 的模型 id, 插件不生成别名。
+
+## 设置界面
+
+插件自带两个界面, 都走 `river` Remote 命名空间读写:
+
+- 设置 → 模型 → `river.ai` 卡片: 接口地址和当前账号在这里改, 上下文窗口与输出预算也是。下面逐模型列出推理强度, 再往下是账号表和设置页的开关。
+- 设置 → `river.ai` 页: 账号表与粘贴 key 在这, 模型可见性和模型路由也在这。页面顶部复用卡片里的容量与档位控件。
+
+`showSettingsSection` 控制第二项, 默认 `true`。关掉之后只留卡片, 账号管理仍在卡片里。
+
+页面第一次加载就会注册, 不等 Remote 返回: 一个看不见的开关没法打开, 而 Remote 挂掉时页面正好是唯一能报告原因的地方。Host 返回 `false` 之后入口才撤掉。
+
+插件的挂载状态写在页面元素上, 排查时不必开控制台:
+
+```js
+document.documentElement.dataset.dshRiver            // 'mounted'
+document.documentElement.dataset.dshRiverCard        // 'registered'
+document.documentElement.dataset.dshRiverSection     // 'registered' | 'withdrawn'
+document.documentElement.dataset.dshRiverRemote      // 'mounted' | 'failed: ...'
+window.__dshRiver.state()                            // 当前快照与错误
+```
+
+`window.__dshRiver` 只暴露 `state()`、`refresh()`、`edit(field, value)`, 不读写任何凭据。
+
+## 配置
+
+写在 `cordis.patch.yml` 的 `llm-river` 段, 或者在上面的界面里改。界面写的就是这一段的字段。
+
+| 字段 | 默认值 | 作用 |
+| --- | --- | --- |
+| `apiBase` | `https://api.river.ai/v1` | 接口地址 |
+| `apiKeyEnv` | `RIVERAI_API_KEY` | 第一个账号的凭据引用 |
+| `apiKey` | 无 | 第一个账号的字面量 key, 优先用引用 |
+| `accounts` | `[]` | 额外账号, 每项 `{label, apiKeyEnv, apiKey}` |
+| `activeAccount` | 空 | 固定一个账号, 留空按健康度轮转 |
+| `modelAccountRules` | `[]` | 把匹配的模型固定到某个账号, 支持 glob |
+| `requestTimeoutMs` | `900000` | 整个请求的预算, river 文档写单次响应最长 15 分钟 |
+| `streamIdleTimeoutMs` | `600000` | 流中间最长静默, river 文档写 prefill 最长 10 分钟 |
+| `maxOutputTokens` | 无 | 全局输出上限, 留空用模型自己的上限 |
+| `contextWindowLimit` | 无 | 上报给模型的上下文窗口, 留空用 1,048,576 |
+| `defaultReasoningEffort` | `{}` | 按模型 id 或 glob 指定档位, `auto` 表示不干预 |
+| `visibleModels` | `[]` | 只显示这些模型, 留空显示全部 |
+| `modelVisibility` | `{}` | 单模型开关, 优先于 `visibleModels` |
+| `showSettingsSection` | `true` | 是否在设置导航里放 `river.ai` 页 |
+
+`contextWindowLimit` 要大于 `maxOutputTokens` 加上压缩余量, 否则压力压缩算不出空间, 会直接拒绝运行。river 的 1,048,576 对 384,000 这个比例余量很薄, 同时压住两者是测试过的配置。
+
+## 多账号轮转
+
+请求先看 `modelAccountRules`, 再看 `activeAccount`, 都没有就在可用账号里轮转。
+
+- 429: 该账号进入冷却, 直到 `Retry-After` 或响应里给出的重置时间。
+- 401 / 403: 该账号停用, 不再参与轮转。
+- 单次请求最多换 16 个账号 (`MAX_ACCOUNT_ROTATIONS`), 换完仍不可用就整体失败。
+- 全部账号都不可用时, 错误码取最具体的一个: 全 401 报 `INVALID_CREDENTIAL`, 有窗口标记报 `RATE_LIMIT`, 否则报 `THROTTLED`。
+- 冷却短于 900 秒时, 等待时间随错误一起交给 DSH 的重试层 (`providerRetryAfterMs`), 超过就放弃这次重试。
+
+冷却状态按 `apiBase` 共享, 换接口地址等于换一套健康记录。
+
+## 已知限制
+
+- 不做 web search: river 没有对应的检索后端, 插件不改写 `searchProvider`。
+- 流式响应中断后重试会重新计费已经发出去的 token, 这是 river 按输出计费的直接结果, 插件无法避免, 只能在 `streamIdleTimeoutMs` 内判定中断。
+- 档位写错会在发请求前报配置错误, 不会被静默改成相邻档位; 想批量改就用 `defaultReasoningEffort` 的 glob。
+- 插件只上报 river 文档给出的模型上限。文档和线上不一致时以线上为准, 上限会被服务端拒绝而不是本地截断。
+
+## 开发
 
 ```bash
-dsh credentials set RIVERAI_API_KEY rv_...     # or put it in .credentials.yaml
-dsh config set llm-river.apiKeyEnv RIVERAI_API_KEY
+npm run typecheck             # tsc --noEmit
+npm test                      # 74 个离线测试, 不联网
+npm run build                 # tsc 出 host, tsdown 出 client, 再跑 check:dist
 ```
 
-The model picker then lists `river` models. Nothing about the provider is required for
-other providers to keep working — this plugin registers only its own route.
+`check:dist` 逐个用 `node --check` 校验 `lib/*.js`, 再断言 client 产物带 loader 包装和两处槽注册。构建产物解析不过时这一步直接失败, 不必等到启动。
 
-> Restart is mandatory and a restart is not a reload: a session's context budget is fixed
-> when the session is created, so an already-open conversation keeps the old limits. Open a
-> new session to see the plugin's models.
+`tests/render.test.ts` 用 `react-dom/server` 真渲染卡片和设置页, 渲染期崩溃不会被当成"什么都没发生"。
 
-## Settings in the GUI
-
-The package ships a web client, so the provider is configured where you expect it instead of
-in a YAML file:
-
-- **Settings → Models → river** — base URL, the active account, the context/output ceilings,
-  a per-model reasoning default, and the account table. Without the client, DSH renders one
-  line for an unknown provider layout ("other fields live in cordis.patch.yml"); the card
-  replaces that line.
-- **Settings → river.ai** (optional, off by default) — the same account table plus model
-  visibility and routing rules, on its own nav entry. Turn it on with the *设置侧栏页面*
-  switch in the card, or with `showSettingsSection: true` in the patch file. The card keeps
-  working either way, so the page is a preference rather than a requirement.
-
-Keys are pasted in the account table and written to the credential store, not to the
-profile's patch file, which is plain text on disk.
-
-Every write goes through the `river` Remote namespace and lands in `cordis.patch.yml` via the
-settings service, so the file stays the single source of truth and a hand edit is still
-honoured. Reasoning choices are DSH's own levels — `off`, `high`, `max` for the DeepSeek
-models — and the picker only offers what that model accepts.
-
-## Accounts
-
-One account is the `apiKeyEnv` / `apiKey` pair at the top level. Additional ones go in
-`accounts`:
-
-```yaml
-llm-river:
-  apiKeyEnv: RIVERAI_API_KEY
-  accounts:
-    - label: Work
-      apiKeyEnv: RIVERAI_API_KEY_WORK
-    - label: Spare
-      apiKey: rv_...          # literal; prefer the env var
-  modelAccountRules:
-    - models: ["zai-org/GLM-*"]
-      account: Work
-  activeAccount: ""           # empty = rotate
-```
-
-Rules are applied in this order:
-
-1. **Model rule** — a `modelAccountRules` entry whose glob matches the model id.
-2. **Pinned account** — `activeAccount`, if that account is currently usable.
-3. **Rotation** — the next usable account, starting after the last one used.
-4. **Revival probe** — when every account is marked, cooldowns that have elapsed are
-   retried once before giving up.
-
-A key is marked after the provider rejects it:
-
-| river.ai response | Mark | Effect |
-| --- | --- | --- |
-| `429` | `rate-limit` | skipped until `Retry-After` elapses |
-| `402`, `403` with quota text | `throttled` | skipped for a fixed window |
-| `401` | `invalid-credential` | disabled until the key changes |
-| `503` | `throttled` | backed off, then retried |
-
-`/river-accounts` prints what the pool currently believes:
-
-```
-- Default (default) — ready
-- Work (RIVERAI_API_KEY_WORK) — cooling down 42s: rate-limit
-- Spare (account-3) — disabled: invalid credential
-```
-
-A single turn can walk through several accounts: the key is resolved per HTTP attempt, not
-per turn, so a rate-limited key mid-conversation costs one retry rather than the reply.
-
-### Retry budget
-
-DSH's retry layer reads `providerRetryAfterMs` from the failure and gives up once the wait
-exceeds the adapter's `maxDelayMs`. This plugin reports `maxDelayMs = 900_000` (15 minutes,
-matching river.ai's documented response ceiling) and counts one retry per account rotation,
-so the budget is 16 rotations × 4.
-
-**Retries are billed again.** river.ai's limits page is explicit: *"Incomplete streams cannot
-be resumed; retries are new requests and may incur additional charges."* A turn that dies
-halfway and is retried pays for the tokens of the attempt that failed as well — and the same
-page warns *"Do not replay completed tool actions"*, so a retry also re-runs whatever the
-model asks for next. When a reply keeps dying mid-stream the account is usually not the
-problem; lower `streamIdleTimeoutMs`/`requestTimeoutMs` to fail faster, or move to a shorter
-prefill.
-
-## Reasoning
-
-`reasoning_effort` is validated per model before the request is sent, because river.ai
-rejects a value a model does not support:
-
-The levels are DSH's own vocabulary (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`,
-`max`), so a value chosen in one provider's picker means the same thing here. Only the
-levels each model really accepts are offered:
-
-| Model | Accepted efforts | Wire value `off` becomes |
-| --- | --- | --- |
-| `deepseek-ai/DeepSeek-V4.1-Flash-1017` | `off`, `high`, `max` | field omitted |
-| `deepseek-ai/DeepSeek-V4.1-Flash` | `off`, `high`, `max` | field omitted |
-| `zai-org/GLM-5.3-Flash` | `low`, `high`, `max` (always reasoning) | — no `off` at all |
-| `nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4` | none — no published table | — |
-
-`off` is a harness level, not a river one: river spells it `none`, and sending `none`
-explicitly is not the same as leaving the field out. This plugin omits `reasoning_effort`
-entirely, which is what "no reasoning" means on the wire.
-
-No river model accepts `medium`. The picker offers exactly what the table lists and nothing
-else, so a level that would be a `400` cannot be chosen in the first place. Two different
-paths meet the rest of that wall:
-
-- **`defaultReasoningEffort`** (this plugin's setting) is validated strictly. A value the
-  model does not accept is a configuration error and is reported as one — nothing is snapped
-  behind your back, because a snapped level changes both what the model does and what it
-  costs, on every turn, with nothing to notice.
-- **A per-turn request** from the harness may carry an alias river has never heard of
-  (`minimal`, `xhigh`, `ultra`). Those are translated to the nearest supported level,
-  cheaper side on a tie: a caller asking for `low` on DeepSeek gets `off`, not `high`.
-
-Reasoning text arrives as a thinking block ahead of the answer rather than being glued onto
-it.
-
-## Context and output budget
-
-`/v1/models` returns only `id`, `object` and `owned_by` — no context window, no output
-ceiling, no modality list. Limits therefore come from a snapshot maintained against the
-docs. A model river ships tomorrow still gets the full 1M context every river model
-publishes, no effort picker it might reject, and a 32K output ceiling until the snapshot
-names it.
-
-Nothing caps the context unless you say so, so the advertised window is the model's own 1M:
-
-```yaml
-llm-river:
-  contextWindowLimit: 262144   # optional: 1M → 256K
-  maxOutputTokens: 65536       # optional: 64K instead of the model's 384K
-```
-
-Both are worth lowering, and not only for cost. `maxOutputTokens` becomes each request's
-`max_tokens`, and DSH's compaction reserves that same amount when it decides how much
-history fits. Pinning the documented maxima (context 1,048,576 / output 384,000) leaves
-almost no room for compaction — the pressure budget collapses to near zero and long
-sessions thrash. A 256K window with a 64K output budget keeps both meaningful.
-
-A `finish_reason` of `length` arrives as `max-tokens`: the answer was cut, so raise
-`maxOutputTokens` for that model rather than retrying the same turn.
-
-## Images
-
-JPEG and PNG are forwarded as base64 with the harness attachment store as the source — the
-25 MB per-image limit and the 50 MiB request-body limit are checked before the request goes
-out, and an oversized image fails the turn with a clear message instead of a `413`.
-
-## Models and prices
-
-The catalog comes from `/v1/models` and is merged over a bundled snapshot, so a new river.ai
-model shows up without a plugin release. Prices are per million tokens and refreshed from
-`https://console.river.ai/api/public/pricing` at most every six hours; a failed refresh
-keeps the last known table rather than blanking it.
-
-To trim the picker:
-
-```yaml
-llm-river:
-  visibleModels: ["deepseek-ai/DeepSeek-V4.1-Flash-1017"]
-  modelVisibility:
-    "nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4": false
-```
-
-## Other settings
-
-| Key | Default | Meaning |
-| --- | --- | --- |
-| `apiBase` | `https://api.river.ai/v1` | Endpoint base |
-| `apiKeyEnv` | `RIVERAI_API_KEY` | Credential ref for the first account |
-| `apiKey` | — | Literal key for the first account |
-| `activeAccount` | — | Pin to one account; empty rotates |
-| `modelAccountRules` | `[]` | Model → account routing |
-| `requestTimeoutMs` | 900000 | Whole-request budget |
-| `streamIdleTimeoutMs` | 600000 | Longest mid-stream silence |
-| `maxOutputTokens` | per model | Output ceiling; also the request's `max_tokens` |
-| `contextWindowLimit` | per model | Ceiling for the advertised context window |
-| `defaultReasoningEffort` | `{}` | Default effort per model id or glob; invalid values error |
-| `visibleModels` | `[]` | Allow-list for the picker |
-| `modelVisibility` | `{}` | Per-model overrides |
-| `showSettingsSection` | `false` | Add the optional river.ai page to the settings nav |
-
-## Reasoning effort and context as settings
-
-Two knobs bound what a model costs. Both accept a per-model map or a ceiling, and
-neither can push a number past what the model actually supports:
-
-```yaml
-llm-river:
-  # Per model id (or glob). Must be a level that model accepts — anything else is
-  # reported as a configuration error. "auto" keeps the model's own default.
-  defaultReasoningEffort:
-    "deepseek-ai/DeepSeek-V4.1-Flash-1017": high
-    "zai-org/GLM-*": max
-  # Advertised context ceiling. Only ever lowers the model's own capacity.
-  contextWindowLimit: 262144
-  # Output ceiling. Never above the model maximum.
-  maxOutputTokens: 65536
-```
-
-`defaultReasoningEffort` is resolved when the harness asks for a model's metadata, so
-it becomes the route's `defaultEffort`: a request that omits an effort gets it, a
-request that names one keeps it, and the choice is recorded in the session's request
-header. `auto` and an empty value both mean "no opinion" — a model nobody configured
-keeps its own default rather than inheriting another model's.
-
-The value is checked against that model's whitelist and, unlike a per-turn request, it is
-never snapped: `low` on a DeepSeek model raises
-`DeepSeek-V4.1-Flash accepts only off|high|max for reasoning_effort, not "low"` instead of
-quietly becoming `off`. Naming a model the snapshot does not know yet is rejected the same
-way — there is no whitelist to validate against until the snapshot lists it.
-
-`contextWindowLimit` is the ceiling for the window advertised to the harness, which is
-what the usage meter, compaction thresholds and the reference-file budget read. It does
-not change the request body: river has no field for it.
-
-Keep `contextWindowLimit` comfortably above `maxOutputTokens`. `dsh-compaction-basic`
-reserves the effective `max_tokens` out of the advertised window before computing its
-pressure threshold, so a window that barely exceeds the output budget leaves compaction
-no room and it refuses to run. With river's documented maximums (1,048,576 context vs
-384,000 output) that margin is thin — capping both, as above, is the configuration this
-plugin is tested against.
-
-## Development
+两个联网工具不进 `npm test`:
 
 ```bash
-npm run typecheck
-npm test                     # 67 offline tests, no network
-npm run build                # tsc -> lib/ (host), tsdown -> lib/client.js, then check:dist
+RIVERAI_API_KEY=rv_... node --import tsx tools/live-smoke.ts        # 协议、用量、错误码
+RIVERAI_API_KEY=rv_... RIVERAI2_API_KEY=rv_... node --import tsx tools/live-accounts.ts  # 双账号轮转
 ```
 
-Two opt-in tools hit the real API and are never part of `npm test`:
+## 许可证
 
-```bash
-RIVERAI_API_KEY=rv_... node --import tsx tools/live-smoke.ts     # protocol, usage, errors
-RIVERAI_API_KEY=rv_... RIVERAI_API_KEY_2=rv_... \
-  node --import tsx tools/live-accounts.ts                     # two-account rotation
-```
-
-`tools/dump-frames.ts` records raw SSE frames to a file for offline replay, which is how
-protocol changes get diagnosed without burning quota.
-
-## Not included, on purpose
-
-The upstream plugin this was modelled on carries Command Code-specific surfaces: a login
-flow, plan filtering, zero-data-retention headers, a hosted web-search backend and TUI
-quota widgets. river.ai has no equivalent endpoint for any of them, so none are faked here.
+MIT, 见 `LICENSE`。
