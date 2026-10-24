@@ -660,7 +660,6 @@ function RiverProviderCard(): Node {
   const snapshot = state.snapshot
   const active = snapshot.accounts.find((account) => account.active)
   const ready = snapshot.accounts.filter((account) => account.status === 'ready').length
-  const primary = snapshot.models[0]
 
   return h('div', { className: 'rv-card' },
     h('div', { className: 'rv-head' },
@@ -670,6 +669,47 @@ function RiverProviderCard(): Node {
       h('span', { className: 'rv-sub' }, `${snapshot.models.length} 个模型`),
     ),
 
+    h(RiverControls, { snapshot, disabled }),
+
+    h('div', { className: 'rv-section' },
+      h('span', { className: 'rv-sectionTitle' }, '账号'),
+      h('table', { className: 'rv-table' },
+        h('thead', {},
+          h('tr', {},
+            h('th', {}, '账号'),
+            h('th', {}, '凭据引用'),
+            h('th', {}, '状态'),
+            h('th', {}, ''),
+          )),
+        h('tbody', {},
+          snapshot.accounts.map((account) => h(AccountRow, { key: account.id, account, disabled })),
+        ),
+      ),
+    ),
+
+
+    state.notice === '' ? null : h('p', { className: `rv-notice ${state.noticeOk ? 'rv-notice-ok' : 'rv-notice-bad'}` }, state.notice),
+
+    h('div', { className: 'rv-actions' },
+      h('button', {
+        type: 'button',
+        className: 'rv-button',
+        disabled,
+        onClick: () => void store.refresh(),
+      }, state.status === 'loading' ? '刷新中…' : '刷新'),
+      h('span', { className: 'rv-sub' }, snapshot.ui.showSettingsSection
+        ? '模型可见性与路由规则在「设置 → river.ai」页'
+        : '模型可见性与路由规则写在 cordis.patch.yml 的 llm-river 段'),
+    ),
+  )
+}
+
+/** The controls both the provider card and the settings page edit. */
+function RiverControls(props: { snapshot: RiverSnapshot; disabled: boolean }): Node {
+  const snapshot = props.snapshot
+  const disabled = props.disabled
+  const primary = snapshot.models[0]
+  return h('div', { className: 'rv-controls' },
     h('div', { className: 'rv-row' },
       h(Field, {
         label: '接口地址',
@@ -723,22 +763,6 @@ function RiverProviderCard(): Node {
       h('p', { className: 'rv-hint' }, '这里只列出 river 每个模型真正接受的档位；「自动」表示不干预，交给模型默认值。'),
     ),
 
-    h('div', { className: 'rv-section' },
-      h('span', { className: 'rv-sectionTitle' }, '账号'),
-      h('table', { className: 'rv-table' },
-        h('thead', {},
-          h('tr', {},
-            h('th', {}, '账号'),
-            h('th', {}, '凭据引用'),
-            h('th', {}, '状态'),
-            h('th', {}, ''),
-          )),
-        h('tbody', {},
-          snapshot.accounts.map((account) => h(AccountRow, { key: account.id, account, disabled })),
-        ),
-      ),
-    ),
-
     h(SwitchRow, {
       label: '设置侧栏页面',
       hint: '在设置导航里加一个 river.ai 页（还包含模型可见性与路由）；关掉后本卡片仍可管理账号',
@@ -746,20 +770,6 @@ function RiverProviderCard(): Node {
       disabled,
       onCommit: (value: boolean) => void store.edit('showSettingsSection', value),
     }),
-
-    state.notice === '' ? null : h('p', { className: `rv-notice ${state.noticeOk ? 'rv-notice-ok' : 'rv-notice-bad'}` }, state.notice),
-
-    h('div', { className: 'rv-actions' },
-      h('button', {
-        type: 'button',
-        className: 'rv-button',
-        disabled,
-        onClick: () => void store.refresh(),
-      }, state.status === 'loading' ? '刷新中…' : '刷新'),
-      h('span', { className: 'rv-sub' }, snapshot.ui.showSettingsSection
-        ? '模型可见性与路由规则在「设置 → river.ai」页'
-        : '模型可见性与路由规则写在 cordis.patch.yml 的 llm-river 段'),
-    ),
   )
 }
 
@@ -905,6 +915,8 @@ function RiverSettingsPage(): Node {
       h('span', { className: 'rv-sub' }, '多个 key 自动轮转：429 冷却、401 停用，任一恢复后自动重新参与'),
     ),
 
+
+    h(RiverControls, { snapshot, disabled }),
     h('table', { className: 'rv-table' },
       h('thead', {},
         h('tr', {},
@@ -1017,6 +1029,12 @@ function AccountRow({ account, disabled }: { account: AccountView; disabled: boo
 // Plugin entry
 // ---------------------------------------------------------------------------
 
+/** Diagnostics a support reply can read straight off the page element. */
+function mark(name: string, value: string): void {
+  if (typeof document === 'undefined') return
+  document.documentElement.dataset[name] = value
+}
+
 /** Mount the Remote contribution and publish the namespace to the store. */
 function connectRemote(ctx: ClientContext): () => void {
   let cancelled = false
@@ -1030,10 +1048,14 @@ function connectRemote(ctx: ClientContext): () => void {
       unmount = dispose
       ctx.inject([`remote.${REMOTE_NAMESPACE}`], (namespaceCtx) => {
         const remote = namespaceCtx.get(`remote.${REMOTE_NAMESPACE}`) as RiverRemote | undefined
-        if (remote !== undefined) store.attach(remote)
+        if (remote !== undefined) {
+          store.attach(remote)
+          mark('dshRiverRemote', 'mounted')
+        }
       })
     })
     .catch((error: unknown) => {
+      mark('dshRiverRemote', `failed: ${String(error).slice(0, 200)}`)
       ctx.logger.warn(`river: could not mount the settings Remote: ${String(error)}`)
     })
   return () => {
@@ -1044,18 +1066,21 @@ function connectRemote(ctx: ClientContext): () => void {
 }
 
 /**
- * Publish the settings page only while the switch is on.
+ * Publish the settings page, and let the switch take it away again.
  *
- * The switch is a host setting, so its value is unknown at load time and the
- * registration cannot be unconditional. `slots.inject` is still used for the
- * first registration because registering into a slot nobody declared yet
- * throws; after that the slot exists and the disposer lets the nav entry come
- * and go with the switch.
+ * The page starts attached even though the switch lives on the Host: an entry
+ * nobody can see cannot be switched on, and a Host setting that never arrives
+ * (Remote down, older Host) must not hide the page that reports the problem.
+ * A snapshot that says `false` detaches it, which is what the switch does.
+ *
+ * `slots.inject` is used for the first registration because registering into a
+ * slot nobody declared yet throws; after that the slot exists and the disposer
+ * lets the nav entry come and go.
  */
 function attachSettingsSection(ctx: ClientContext): void {
   let dispose: (() => void) | undefined
   let declared = false
-  let wanted = false
+  let wanted = true
 
   const sync = (): void => {
     if (wanted && declared && dispose === undefined) {
@@ -1075,7 +1100,9 @@ function attachSettingsSection(ctx: ClientContext): void {
 
   ctx.effect(() => {
     const unsubscribe = store.subscribe(() => {
-      const enabled = store.state().snapshot?.ui.showSettingsSection ?? false
+      const snapshot = store.state().snapshot
+      if (snapshot === undefined) return
+      const enabled = snapshot.ui.showSettingsSection
       if (enabled === wanted) return
       wanted = enabled
       sync()
@@ -1100,6 +1127,7 @@ function attachSettingsSection(ctx: ClientContext): void {
 }
 
 export function apply(ctx: ClientContext): void {
+  mark('dshRiver', 'mounted')
   injectCss()
   ctx.effect(() => connectRemote(ctx), 'dsh-river-provider: settings Remote')
   ctx.effect(() => () => {
@@ -1112,11 +1140,14 @@ export function apply(ctx: ClientContext): void {
       name: 'settings.models.provider-card',
       key: 'llm-river',
     }, RiverProviderCard))
+    mark('dshRiverCard', 'registered')
   } catch (error) {
+    mark('dshRiverCard', `failed: ${String(error).slice(0, 200)}`)
     ctx.logger.warn(`river: could not register the provider card: ${String(error)}`)
   }
 
   attachSettingsSection(ctx)
+  mark('dshRiverSection', 'registered')
 }
 
 export const inject = ['slots', 'remote']

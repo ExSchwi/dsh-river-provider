@@ -64,9 +64,9 @@ export interface RiverConfig {
     /**
      * Whether the settings navigation shows a dedicated river.ai page.
      *
-     * Off by default: the provider card already carries everything the page does,
-     * and a nav entry nobody asked for is clutter. The page is the better home for
-     * the account table, so it stays one switch away.
+     * On by default: the page is where the account table and the pasted keys
+     * live, so it has to be reachable without first finding another screen.
+     * Turning it off leaves the provider card, which carries the same controls.
      */
     showSettingsSection?: boolean;
 }

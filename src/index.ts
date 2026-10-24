@@ -102,9 +102,9 @@ export interface RiverConfig {
   /**
    * Whether the settings navigation shows a dedicated river.ai page.
    *
-   * Off by default: the provider card already carries everything the page does,
-   * and a nav entry nobody asked for is clutter. The page is the better home for
-   * the account table, so it stays one switch away.
+   * On by default: the page is where the account table and the pasted keys
+   * live, so it has to be reachable without first finding another screen.
+   * Turning it off leaves the provider card, which carries the same controls.
    */
   showSettingsSection?: boolean
 }
@@ -163,10 +163,10 @@ const Config = Schema.object({
     .default({}),
   showSettingsSection: Schema.boolean()
     .description(
-      'Add a dedicated river.ai page to the settings navigation. Off by default; '
-      + 'the provider card carries the same controls either way.',
+      'Show a dedicated river.ai page in the settings navigation. On by default; '
+      + 'turn it off to keep only the provider card in Settings > Models.',
     )
-    .default(false),
+    .default(true),
 })
 
 // Every editable field is volatile: the settings form writes them live, and the
@@ -331,7 +331,7 @@ export async function apply(ctx: Context, config: RiverConfig): Promise<void> {
           apiBase: current().apiBase ?? DEFAULT_API_BASE,
           contextWindowLimit: current().contextWindowLimit ?? RIVER_CONTEXT_WINDOW,
           maxOutputTokens: current().maxOutputTokens ?? defaultMaxOutputTokens(),
-          showSettingsSection: current().showSettingsSection ?? false,
+          showSettingsSection: current().showSettingsSection ?? true,
         }),
         pool,
         slots: () => slots(current()),

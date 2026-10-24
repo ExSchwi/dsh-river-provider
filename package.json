@@ -1,6 +1,6 @@
 {
   "name": "@mars-sea/dsh-river-provider",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "DeepSeek Harness LLM provider plugin for river.ai: one provider route over an unlimited set of API-key accounts with passive rotation, live model catalog and per-account usage.",
   "icon": "./icon.svg",
   "repository": {

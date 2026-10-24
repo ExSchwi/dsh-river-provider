@@ -115,11 +115,17 @@ interface Recording {
   registered: Array<{ name?: string; key?: string; id?: string }>
   mounted: string[]
   warns: string[]
+  disposed: number
+}
+
+/** Let the async Remote mount, snapshot read, and subscriber run settle. */
+async function settle(): Promise<void> {
+  for (let i = 0; i < 4; i += 1) await new Promise((resolve) => setTimeout(resolve, 0))
 }
 
 /** A client context with only the services `apply` touches. */
 function fakeContext(showSettingsSection: boolean): { ctx: Record<string, unknown>; seen: Recording } {
-  const seen: Recording = { injected: [], registered: [], mounted: [], warns: [] }
+  const seen: Recording = { injected: [], registered: [], mounted: [], warns: [], disposed: 0 }
   const ctx: Record<string, unknown> = {
     logger: { warn: (message: string) => seen.warns.push(message) },
     effect: (run: () => unknown) => run(),
@@ -141,7 +147,7 @@ function fakeContext(showSettingsSection: boolean): { ctx: Record<string, unknow
       },
       register: (options: Record<string, unknown>) => {
         seen.registered.push(options as Recording['registered'][number])
-        return () => undefined
+        return () => { seen.disposed += 1 }
       },
     },
   }
@@ -150,7 +156,9 @@ function fakeContext(showSettingsSection: boolean): { ctx: Record<string, unknow
 
 test('apply registers the provider card and mounts the Remote', async () => {
   const { ctx, seen } = fakeContext(false)
-  const apply = bundle.exports.apply as (value: unknown) => void
+  // A fresh evaluation per test: the store is a module singleton, so a shared
+  // bundle would let one test's subscriber react to the next test's snapshot.
+  const apply = load().exports.apply as (value: unknown) => void
   apply(ctx)
   await new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -162,16 +170,43 @@ test('apply registers the provider card and mounts the Remote', async () => {
   assert.deepEqual(seen.warns, [], 'registration must not fall into a warning path')
 })
 
-test('the settings section stays out until the switch is on', async () => {
-  const { ctx, seen } = fakeContext(true)
-  const apply = bundle.exports.apply as (value: unknown) => void
+test('the settings section is published before any snapshot arrives', async () => {
+  // A dead Remote must not be able to hide the page that reports it: the entry
+  // has to exist on the strength of the bundle alone.
+  const { ctx, seen } = fakeContext(false)
+  // A fresh evaluation per test: the store is a module singleton, so a shared
+  // bundle would let one test's subscriber react to the next test's snapshot.
+  const apply = load().exports.apply as (value: unknown) => void
   apply(ctx)
-  await new Promise((resolve) => setTimeout(resolve, 0))
 
-  assert.ok(seen.injected.includes('settings.section'), 'the section slot must be waited for')
   const section = seen.registered.find((entry) => entry.name === 'settings.section')
-  assert.ok(section !== undefined, 'an enabled switch must register the section')
+  assert.ok(section !== undefined, 'the section must register without waiting for the Remote')
   assert.equal(section.id, 'river', 'the section id names the provider')
+  assert.ok(seen.injected.includes('settings.section'), 'the section slot must be waited for')
+})
+
+test('an off snapshot withdraws the settings section again', async () => {
+  const { ctx, seen } = fakeContext(false)
+  // A fresh evaluation per test: the store is a module singleton, so a shared
+  // bundle would let one test's subscriber react to the next test's snapshot.
+  const apply = load().exports.apply as (value: unknown) => void
+  apply(ctx)
+  await settle()
+
+  assert.ok(seen.registered.some((entry) => entry.name === 'settings.section'), 'a switch-off must follow a registration')
+  assert.equal(seen.disposed, 1, 'the off snapshot must dispose the registered section')
+})
+
+test('an on snapshot keeps the settings section', async () => {
+  const { ctx, seen } = fakeContext(true)
+  // A fresh evaluation per test: the store is a module singleton, so a shared
+  // bundle would let one test's subscriber react to the next test's snapshot.
+  const apply = load().exports.apply as (value: unknown) => void
+  apply(ctx)
+  await settle()
+
+  assert.ok(seen.registered.some((entry) => entry.name === 'settings.section'))
+  assert.equal(seen.disposed, 0, 'an on snapshot must leave the section in place')
 })
 
 console.log('client bundle: ok')
