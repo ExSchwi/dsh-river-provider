@@ -1090,11 +1090,13 @@ function attachSettingsSection(ctx: ClientContext): void {
         order: 13,
         label: () => 'river.ai',
       }, RiverSettingsPage) as () => void
+      mark('dshRiverSection', 'registered')
       return
     }
     if (!wanted && dispose !== undefined) {
       dispose()
       dispose = undefined
+      mark('dshRiverSection', 'withdrawn')
     }
   }
 
@@ -1147,7 +1149,30 @@ export function apply(ctx: ClientContext): void {
   }
 
   attachSettingsSection(ctx)
-  mark('dshRiverSection', 'registered')
+  publishDebug()
+}
+
+/**
+ * A support hook for the page itself.
+ *
+ * Nothing here reads or writes credentials: it exposes exactly the two actions a
+ * visible control performs, so a user whose pane renders blank can still turn the
+ * nav entry on and hand back a snapshot.
+ */
+interface RiverDebug {
+  state: () => State
+  refresh: () => Promise<void>
+  edit: (field: EditField, value: unknown) => Promise<boolean>
+}
+
+function publishDebug(): void {
+  if (typeof window === 'undefined') return
+  const hook: RiverDebug = {
+    state: () => store.state(),
+    refresh: () => store.refresh(),
+    edit: (field, value) => store.edit(field, value as never),
+  }
+  ;(window as unknown as { __dshRiver?: RiverDebug }).__dshRiver = hook
 }
 
 export const inject = ['slots', 'remote']
